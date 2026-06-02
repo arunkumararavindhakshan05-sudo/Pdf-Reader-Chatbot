@@ -1,12 +1,13 @@
 import streamlit as st
 from PyPDF2 import PdfReader
 from langchain_text_splitters import CharacterTextSplitter
-from langchain_community.embeddings import HuggingFaceEmbeddings
 from langchain_community.vectorstores import FAISS
 from langchain_groq import ChatGroq
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.output_parsers import StrOutputParser
+from langchain_community.embeddings import FakeEmbeddings
 from dotenv import load_dotenv
+import os
 
 load_dotenv()
 
@@ -26,6 +27,10 @@ if pdf is not None:
         if extracted:
             text += extracted
 
+    if not text.strip():
+        st.error("Could not read text from this PDF. Try a different PDF.")
+        st.stop()
+
     # Cut into chunks
     splitter = CharacterTextSplitter(
         separator="\n",
@@ -34,26 +39,26 @@ if pdf is not None:
     )
     chunks = splitter.split_text(text)
 
-    # Free offline embeddings
-    st.info("Loading AI model... please wait on first run.")
-    embeddings = HuggingFaceEmbeddings(model_name="all-MiniLM-L6-v2")
+    # Lightweight embeddings - works on any server!
+    embeddings = FakeEmbeddings(size=768)
     knowledge_base = FAISS.from_texts(chunks, embeddings)
 
-    st.success("PDF loaded successfully! Ask me anything about it.")
+    st.success("PDF loaded! Ask me anything about it.")
 
     question = st.text_input("Type your question here:")
 
     if question:
-        docs = knowledge_base.similarity_search(question)
+        docs = knowledge_base.similarity_search(question, k=4)
         context = "\n\n".join([doc.page_content for doc in docs])
 
-        # Groq - completely free and very fast!
         llm = ChatGroq(
-              model="llama-3.1-8b-instant",
-              temperature=0
-   )
+            model="llama-3.1-8b-instant",
+            temperature=0,
+            api_key=os.environ.get("GROQ_API_KEY")
+        )
+
         prompt = ChatPromptTemplate.from_template("""
-        You are a helpful assistant. Use the context below to answer the question.
+        You are a helpful assistant. Use ONLY the context below to answer.
         If the answer is not in the context, say "I could not find that in the PDF."
 
         Context:
@@ -61,14 +66,17 @@ if pdf is not None:
 
         Question:
         {question}
+
+        Answer clearly and concisely:
         """)
 
         chain = prompt | llm | StrOutputParser()
 
-        answer = chain.invoke({
-            "context": context,
-            "question": question
-        })
+        with st.spinner("Thinking..."):
+            answer = chain.invoke({
+                "context": context,
+                "question": question
+            })
 
         st.write("### Answer:")
         st.write(answer)
