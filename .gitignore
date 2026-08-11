@@ -1,0 +1,32 @@
+# Virtual environment
+.venv/
+
+# Secrets and environment variables
+.env
+.env.*
+!.env.example
+.streamlit/secrets.toml
+
+# Python-generated files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Testing and code-quality files
+.pytest_cache/
+.ruff_cache/
+.coverage
+.coverage.*
+htmlcov/
+
+# Temporary uploads and private documents
+uploads/
+temp/
+data/private/
+
+# Logs
+*.log
+
+# Operating-system files
+.DS_Store
+Thumbs.db
