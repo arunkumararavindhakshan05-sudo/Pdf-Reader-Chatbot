@@ -14,6 +14,15 @@ from src.voice_service import VoiceService, create_groq_audio_client
 
 LOGGER = logging.getLogger(__name__)
 
+TTS_VOICES = {
+    "Hannah": "hannah",
+    "Autumn": "autumn",
+    "Diana": "diana",
+    "Austin": "austin",
+    "Daniel": "daniel",
+    "Troy": "troy",
+}
+
 
 class ChatMessage(TypedDict, total=False):
     """One user or assistant message stored in Streamlit state."""
@@ -21,6 +30,7 @@ class ChatMessage(TypedDict, total=False):
     role: str
     content: str
     evidence: list[SearchResult]
+    audio: bytes
 
 
 st.set_page_config(
@@ -55,8 +65,8 @@ def get_groq_api_key() -> str:
         return environment_key
 
     try:
-        return str(st.secrets.get("GROQ_API_KEY", "")).strip()
-    except Exception:  # noqa: BLE001
+        return str(st.secrets["GROQ_API_KEY"]).strip()
+    except (FileNotFoundError, KeyError):
         return ""
 
 
@@ -78,12 +88,16 @@ def render_evidence(evidence: list[SearchResult]) -> None:
 
 
 def render_chat_history(messages: list[ChatMessage]) -> None:
-    """Render previous questions and answers for the active PDF."""
+    """Render previous questions, answers, and generated answer audio."""
     for message in messages:
         with st.chat_message(message["role"]):
             st.markdown(message["content"])
 
             if message["role"] == "assistant":
+                answer_audio = message.get("audio")
+                if answer_audio:
+                    st.audio(answer_audio, format="audio/wav")
+
                 render_evidence(message.get("evidence", []))
 
 
@@ -92,6 +106,8 @@ st.caption(
     "Ask grounded questions about a PDF using semantic retrieval, "
     "FAISS, Groq, and page-aware citations."
 )
+
+api_key = get_groq_api_key()
 
 with st.sidebar:
     st.header("Retrieval settings")
@@ -116,13 +132,37 @@ with st.sidebar:
         "reject questions that use different wording."
     )
 
+    st.divider()
+    st.header("Spoken answers")
+
+    read_answers_aloud = st.toggle(
+        "Read new answers aloud",
+        value=False,
+        disabled=not api_key,
+        help=(
+            "When enabled, each new answer is converted to WAV audio "
+            "using Groq text-to-speech."
+        ),
+    )
+
+    selected_voice_name = st.selectbox(
+        "Answer voice",
+        options=list(TTS_VOICES),
+        index=0,
+        disabled=not read_answers_aloud,
+    )
+    selected_voice = TTS_VOICES[selected_voice_name]
+
+    st.caption(
+        "Speech is generated only for new answers while this option is "
+        "enabled. This avoids unnecessary API usage."
+    )
+
 uploaded_pdf = st.file_uploader(
     "Upload one text-based PDF",
     type=["pdf"],
     accept_multiple_files=False,
 )
-
-api_key = get_groq_api_key()
 
 if not api_key:
     st.warning(
@@ -144,7 +184,7 @@ except (PdfReadError, ValueError) as error:
     LOGGER.exception("The uploaded PDF could not be processed.")
     st.error(str(error))
     st.stop()
-except Exception as error:  # noqa: BLE001
+except Exception as error:
     LOGGER.exception("Unexpected document indexing failure.")
     st.error("The document index could not be created.")
     st.caption(f"{type(error).__name__}: {error}")
@@ -158,9 +198,7 @@ if st.session_state.get("active_document_hash") != document_hash:
 if "messages" not in st.session_state:
     st.session_state.messages = []
 
-st.success(
-    f"Indexed {chunk_count} searchable sections across {page_count} pages."
-)
+st.success(f"Indexed {chunk_count} searchable sections across {page_count} pages.")
 
 render_chat_history(st.session_state.messages)
 
@@ -198,7 +236,7 @@ if audio_recording is not None:
         except ValueError as error:
             LOGGER.exception("Voice recording validation failed.")
             st.error(str(error))
-        except Exception as error:  # noqa: BLE001
+        except Exception as error:
             LOGGER.exception("Voice transcription failed.")
             st.error("The voice question could not be transcribed.")
             st.caption(f"{type(error).__name__}: {error}")
@@ -233,16 +271,41 @@ if question:
                 result = service.answer(question)
 
             st.markdown(result["answer"])
+
+            answer_audio: bytes | None = None
+
+            if read_answers_aloud:
+                try:
+                    with st.spinner("Generating the spoken answer..."):
+                        audio_client = create_groq_audio_client(api_key)
+                        voice_service = VoiceService(
+                            client=audio_client,
+                            tts_voice=selected_voice,
+                        )
+                        answer_audio = voice_service.synthesize(result["answer"])
+
+                    st.audio(answer_audio, format="audio/wav")
+                except Exception as error:
+                    LOGGER.exception("Answer speech generation failed.")
+                    st.warning(
+                        "The text answer is ready, but its audio could not "
+                        "be generated."
+                    )
+                    st.caption(f"{type(error).__name__}: {error}")
+
             render_evidence(result["evidence"])
 
-            st.session_state.messages.append(
-                {
-                    "role": "assistant",
-                    "content": result["answer"],
-                    "evidence": result["evidence"],
-                }
-            )
-        except Exception as error:  # noqa: BLE001
+            assistant_message: ChatMessage = {
+                "role": "assistant",
+                "content": result["answer"],
+                "evidence": result["evidence"],
+            }
+
+            if answer_audio:
+                assistant_message["audio"] = answer_audio
+
+            st.session_state.messages.append(assistant_message)
+        except Exception as error:
             LOGGER.exception("The RAG answer request failed.")
             st.error("The AI request failed. Please try again.")
             st.caption(f"{type(error).__name__}: {error}")

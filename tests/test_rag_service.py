@@ -72,9 +72,7 @@ def test_answer_uses_only_evidence_above_threshold() -> None:
     )
 
     retriever = FakeRetriever([strong_evidence, weak_evidence])
-    model = FakeChatModel(
-        "Machine learning discovers patterns in data [Page 3]."
-    )
+    model = FakeChatModel("Machine learning discovers patterns in data [Page 3].")
 
     service = RAGService(
         retriever=retriever,
