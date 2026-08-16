@@ -6,5 +6,5 @@ langchain-groq
 langchain-core
 sentence-transformers
 faiss-cpu
-PyPDF2
+pypdf>=6.16.0
 python-dotenv
