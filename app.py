@@ -34,7 +34,7 @@ class ChatMessage(TypedDict, total=False):
 
 
 st.set_page_config(
-    page_title="PDF Intelligence Assistant",
+    page_title="PDF Reader Chatbot",
     page_icon="📄",
     layout="wide",
 )
@@ -101,11 +101,8 @@ def render_chat_history(messages: list[ChatMessage]) -> None:
                 render_evidence(message.get("evidence", []))
 
 
-st.title("PDF Intelligence Assistant")
-st.caption(
-    "Ask grounded questions about a PDF using semantic retrieval, "
-    "FAISS, Groq, and page-aware citations."
-)
+st.title("PDF Reader Chatbot")
+st.caption("Upload a PDF and ask questions about its content by typing or speaking.")
 
 api_key = get_groq_api_key()
 
@@ -184,10 +181,9 @@ except (PdfReadError, ValueError) as error:
     LOGGER.exception("The uploaded PDF could not be processed.")
     st.error(str(error))
     st.stop()
-except Exception as error:
+except Exception:
     LOGGER.exception("Unexpected document indexing failure.")
     st.error("The document index could not be created.")
-    st.caption(f"{type(error).__name__}: {error}")
     st.stop()
 
 if st.session_state.get("active_document_hash") != document_hash:
@@ -198,7 +194,7 @@ if st.session_state.get("active_document_hash") != document_hash:
 if "messages" not in st.session_state:
     st.session_state.messages = []
 
-st.success(f"Indexed {chunk_count} searchable sections across {page_count} pages.")
+st.success(f"PDF ready: {page_count} pages and {chunk_count} searchable sections.")
 
 render_chat_history(st.session_state.messages)
 
@@ -236,10 +232,9 @@ if audio_recording is not None:
         except ValueError as error:
             LOGGER.exception("Voice recording validation failed.")
             st.error(str(error))
-        except Exception as error:
+        except Exception:
             LOGGER.exception("Voice transcription failed.")
             st.error("The voice question could not be transcribed.")
-            st.caption(f"{type(error).__name__}: {error}")
 
 typed_question = st.chat_input(
     "Ask a question about the uploaded PDF",
@@ -285,13 +280,12 @@ if question:
                         answer_audio = voice_service.synthesize(result["answer"])
 
                     st.audio(answer_audio, format="audio/wav")
-                except Exception as error:
+                except Exception:
                     LOGGER.exception("Answer speech generation failed.")
                     st.warning(
                         "The text answer is ready, but its audio could not "
                         "be generated."
                     )
-                    st.caption(f"{type(error).__name__}: {error}")
 
             render_evidence(result["evidence"])
 
@@ -305,7 +299,6 @@ if question:
                 assistant_message["audio"] = answer_audio
 
             st.session_state.messages.append(assistant_message)
-        except Exception as error:
+        except Exception:
             LOGGER.exception("The RAG answer request failed.")
             st.error("The AI request failed. Please try again.")
-            st.caption(f"{type(error).__name__}: {error}")

@@ -16,7 +16,7 @@ The application extracts text from an uploaded PDF, divides it into smaller sect
 * Generate answers based on the uploaded document
 * Listen to generated answers using text-to-speech
 * Choose from multiple available voices
-* Validate document processing, retrieval, RAG, and voice services through automated tests
+* Run automated tests for document processing, retrieval, RAG, and voice features
 
 ## How It Works
 
@@ -39,7 +39,7 @@ The application extracts text from an uploaded PDF, divides it into smaller sect
 | pypdf                 | PDF text extraction                                       |
 | Sentence Transformers | Text embeddings                                           |
 | FAISS                 | Semantic document retrieval                               |
-| LangChain             | RAG workflow                                              |
+| LangChain             | Text splitting and Groq model integration                 |
 | Groq API              | Answer generation, speech recognition, and text-to-speech |
 | pytest                | Automated testing                                         |
 | Ruff                  | Code formatting and linting                               |
@@ -78,7 +78,7 @@ Pdf-Reader-Chatbot/
 
 Before running the project, make sure the following are available:
 
-* Python 3.12
+* Python 3.12 or newer
 * Git
 * A Groq API key
 
@@ -105,7 +105,7 @@ pip install -r requirements.txt
 
 ### 3. Configure the API Key
 
-Create a `.env` file in the project directory and add the Groq API key:
+Copy `.env.example` to `.env`, then add the Groq API key:
 
 ```env
 GROQ_API_KEY=your_groq_api_key
@@ -174,7 +174,7 @@ ruff check .
 * Add OCR support for scanned documents
 * Preserve conversation history during a session
 * Support additional document formats
-* Add source references to generated answers
+* Allow users to download their chat history
 
 ## Author
 
