@@ -1,140 +1,184 @@
-# 📄 PDF Reader Chatbot
+# PDF Reader Chatbot
 
-![Python](https://img.shields.io/badge/Python-3776AB?style=for-the-badge&logo=python&logoColor=white)
-![LLM](https://img.shields.io/badge/LLM-Powered-orange?style=for-the-badge)
-![Status](https://img.shields.io/badge/Status-Active-brightgreen?style=for-the-badge)
-![Tests](https://img.shields.io/badge/Tests-58%20Passing-success?style=for-the-badge)
+A Streamlit application for asking questions about PDF documents using text or voice.
 
-An **AI-powered PDF chatbot** that lets users upload any PDF, ask natural-language questions about it, and even talk to it — with spoken questions and spoken answers. The system extracts and semantically indexes PDF text, retrieves the most relevant sections for each query, and uses an LLM to generate accurate, context-aware answers.
+The application extracts text from an uploaded PDF, divides it into smaller sections, and retrieves the sections most relevant to the user’s question. A Groq-hosted language model then generates an answer using the retrieved document content.
 
----
+[Open the live application](https://arun-pdf-chatbot.streamlit.app/)
 
-## ✨ Features
+## Features
 
-- 📄 **PDF Q&A (RAG)** — Upload a PDF and ask questions in natural language, answered using retrieval-augmented generation over your document
-- 🔍 **Semantic Search** — FAISS vector index + sentence-transformer embeddings (`all-MiniLM-L6-v2`) retrieve the most relevant chunks for every question
-- 🎙️ **Voice Input** — Speak your question instead of typing; transcribed via Groq's `whisper-large-v3-turbo`
-- 🔊 **Spoken Answers (TTS)** — Bot replies can be read aloud, with a choice of six voices (Hannah, Autumn, Diana, Austin, Daniel, Troy)
-- ✅ **Well-Tested** — 58 automated tests covering document processing, retrieval, RAG, and voice services
+* Upload and process PDF documents
+* Ask questions using text input
+* Record questions using a microphone
+* Convert recorded questions to text with Groq Whisper
+* Retrieve relevant document sections using semantic search
+* Generate answers based on the uploaded document
+* Listen to generated answers using text-to-speech
+* Choose from multiple available voices
+* Validate document processing, retrieval, RAG, and voice services through automated tests
 
----
+## How It Works
 
-## 📸 Demo
+1. The user uploads a PDF through the Streamlit interface.
+2. Text is extracted from the document using `pypdf`.
+3. The extracted text is divided into overlapping chunks to preserve context.
+4. Sentence-transformer embeddings are created for each chunk.
+5. The embeddings are stored in a FAISS index.
+6. When the user asks a question, the most relevant chunks are retrieved.
+7. The retrieved content and question are sent to the Groq-hosted language model.
+8. The generated answer is displayed in the application.
+9. If required, the answer can also be converted to speech and played back.
 
+## Technology Used
+
+| Technology            | Usage                                                     |
+| --------------------- | --------------------------------------------------------- |
+| Python                | Application development                                   |
+| Streamlit             | User interface                                            |
+| pypdf                 | PDF text extraction                                       |
+| Sentence Transformers | Text embeddings                                           |
+| FAISS                 | Semantic document retrieval                               |
+| LangChain             | RAG workflow                                              |
+| Groq API              | Answer generation, speech recognition, and text-to-speech |
+| pytest                | Automated testing                                         |
+| Ruff                  | Code formatting and linting                               |
+| uv                    | Dependency and environment management                     |
+
+## Project Structure
+
+```text
+Pdf-Reader-Chatbot/
+├── src/
+│   ├── document_processor.py
+│   ├── rag_service.py
+│   ├── retriever.py
+│   └── voice_service.py
+├── tests/
+├── .gitignore
+├── app.py
+├── pyproject.toml
+├── requirements.txt
+├── uv.lock
+└── README.md
 ```
-User uploads: "project_report.pdf"
 
-User: "What is the main objective of this project?"
-Bot:  "The main objective is to build a real-time data pipeline that..."
+### Main Components
 
-User: 🎙️ (spoken) "Summarise the conclusion section."
-Bot:  🔊 "The conclusion highlights three key findings: ..."
-```
+* `app.py` contains the Streamlit user interface and connects the application services.
+* `document_processor.py` extracts and divides PDF text into chunks.
+* `retriever.py` creates embeddings and retrieves relevant document sections.
+* `rag_service.py` sends the retrieved context to the language model and generates answers.
+* `voice_service.py` handles speech-to-text and text-to-speech operations.
+* `tests/` contains automated tests for the main application components.
 
----
+## Local Setup
 
-## ⚙️ How It Works
+### Prerequisites
 
-1. **PDF Upload** — User uploads a PDF file through the Streamlit interface
-2. **Text Extraction & Chunking** — Readable text is extracted and split into overlapping chunks for better context
-3. **Embedding & Indexing** — Chunks are embedded with a sentence-transformer model and indexed in FAISS
-4. **Question Input** — User types a question, or asks it by voice (transcribed via Groq Whisper)
-5. **Semantic Retrieval** — The most relevant chunks are retrieved for the question
-6. **LLM Answer Generation** — Retrieved context is passed to a Groq-hosted LLM, which generates a precise answer
-7. **Spoken Answer (optional)** — The answer can be converted to speech and played back
+Before running the project, make sure the following are available:
 
----
+* Python 3
+* Git
+* A Groq API key
 
-## 🛠️ Tech Stack
-
-| Tool | Purpose |
-|---|---|
-| Python 3.x | Core programming language |
-| Streamlit | Web-based user interface |
-| pypdf | PDF text extraction |
-| LangChain / langchain-groq | LLM chaining and retrieval pipeline |
-| Groq API | LLM inference, Whisper transcription, and TTS |
-| sentence-transformers | Text embeddings for semantic search |
-| FAISS | Vector store for document retrieval |
-| pytest | Automated testing (58 tests) |
-| Ruff | Linting |
-
----
-
-## 📦 Installation
+### 1. Clone the Repository
 
 ```bash
-# Clone the repository
 git clone https://github.com/arunkumararavindhakshan05-sudo/Pdf-Reader-Chatbot.git
 cd Pdf-Reader-Chatbot
+```
 
-# Install dependencies
+### 2. Install the Dependencies
+
+Using `uv`:
+
+```bash
+uv sync
+```
+
+Alternatively, install the dependencies using `pip`:
+
+```bash
 pip install -r requirements.txt
 ```
 
-Create a `.env` file (or set a Streamlit secret) with your Groq API key:
+### 3. Configure the API Key
 
+Create a `.env` file in the project directory and add the Groq API key:
+
+```env
+GROQ_API_KEY=your_groq_api_key
 ```
-GROQ_API_KEY=your_groq_api_key_here
+
+Do not commit the `.env` file or expose the API key in the source code.
+
+### 4. Run the Application
+
+Using `uv`:
+
+```bash
+uv run streamlit run app.py
 ```
 
----
-
-## ▶️ Usage
+Or run it directly:
 
 ```bash
 streamlit run app.py
 ```
 
-Then open your browser at `http://localhost:8501`, upload a PDF, and start asking questions — by typing or by voice.
+The application will normally be available at:
 
----
-
-## 📁 Project Structure
-
-```
-Pdf-Reader-Chatbot/
-│
-├── app.py                          # Main Streamlit application
-├── src/
-│   ├── document_processor.py       # PDF text extraction & chunking
-│   ├── retriever.py                # FAISS-based semantic retrieval
-│   ├── rag_service.py              # RAG pipeline (Groq LLM)
-│   └── voice_service.py            # Voice transcription & TTS (Groq)
-├── tests/                          # 58 automated tests (pytest)
-├── requirements.txt
-└── README.md
+```text
+http://localhost:8501
 ```
 
----
+## Running the Tests
 
-## 🧪 Testing & Quality
+Using `uv`:
 
 ```bash
-# Run tests
-pytest
+uv run pytest
+```
 
-# Run linting
+Or:
+
+```bash
+pytest
+```
+
+## Checking Code Quality
+
+Using `uv`:
+
+```bash
+uv run ruff check .
+```
+
+Or:
+
+```bash
 ruff check .
 ```
 
----
+## Current Limitations
 
-## 🚀 Live Demo
+* The application processes one PDF at a time.
+* Scanned PDFs without readable text may require OCR support.
+* Answer quality depends on the text available in the uploaded document.
+* A valid Groq API key is required for language and voice features.
 
-Deployed on **Streamlit Cloud** — try it live: _[add your Streamlit Cloud app URL here]_
+## Planned Improvements
 
----
+* Support multiple PDF files in one session
+* Add OCR support for scanned documents
+* Preserve conversation history during a session
+* Support additional document formats
+* Add source references to generated answers
 
-## 🔮 Future Improvements
-
-- [ ] Support multiple PDF uploads at once
-- [ ] Add chat history / memory across sessions
-- [ ] Support Word (.docx) and Excel (.xlsx) files
-
----
-
-## 👤 Author
+## Author
 
 **Arunkumar Aravindhakshan**
-🔗 [LinkedIn](https://linkedin.com/in/arunkumar-aravindhakshan) | [GitHub](https://github.com/arunkumararavindhakshan05-sudo)
+
+* [GitHub profile](https://github.com/arunkumararavindhakshan05-sudo)
+* [LinkedIn profile](https://linkedin.com/in/arunkumar-aravindhakshan)
