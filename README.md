@@ -78,7 +78,7 @@ Pdf-Reader-Chatbot/
 
 Before running the project, make sure the following are available:
 
-* Python 3
+* Python 3.12
 * Git
 * A Groq API key
 
