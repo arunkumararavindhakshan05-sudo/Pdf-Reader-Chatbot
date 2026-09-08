@@ -1,0 +1,35 @@
+# Anything listed here is never sent to the Docker daemon as build context.
+# This matters for speed (smaller context = faster builds) and for SECURITY:
+# without the .env rule below, a local secrets file would be baked into the
+# image and shipped to a container registry.
+
+.env
+.env.*
+!.env.example
+
+.git
+.github
+.gitignore
+
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+.venv/
+venv/
+uv.lock
+
+tests/
+README.md
+*.md
+!requirements.txt
+
+.vscode/
+.idea/
+.DS_Store
+
+Dockerfile
+.dockerignore

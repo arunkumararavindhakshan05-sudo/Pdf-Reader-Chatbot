@@ -1,0 +1,24 @@
+# Streamlit runtime configuration for containerised deployment.
+
+[server]
+# No browser to open inside a container.
+headless = true
+
+# The file watcher polls the filesystem for code changes. Useful in dev,
+# pure wasted CPU in a read-only production container - and on Azure
+# Container Apps, CPU-seconds are literally the billing unit.
+fileWatcherType = "none"
+
+# Cap uploads at 10 MB. The default is 200 MB; a single 200 MB PDF would
+# exhaust the container's memory during chunking and get it OOM-killed.
+maxUploadSize = 10
+
+[browser]
+# Do not phone home with telemetry from a production container.
+gatherUsageStats = false
+
+[client]
+toolbarMode = "minimal"
+
+[theme]
+base = "light"
