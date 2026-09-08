@@ -1,0 +1,7 @@
+{
+  "name": "github-env-production",
+  "issuer": "https://token.actions.githubusercontent.com",
+  "subject": "repo:arunkumararavindhakshan05-sudo/Pdf-Reader-Chatbot:environment:production",
+  "description": "GitHub Actions deploy job running in the production environment",
+  "audiences": ["api://AzureADTokenExchange"]
+}

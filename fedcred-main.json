@@ -1,0 +1,7 @@
+{
+  "name": "github-branch-main",
+  "issuer": "https://token.actions.githubusercontent.com",
+  "subject": "repo:arunkumararavindhakshan05-sudo/Pdf-Reader-Chatbot:ref:refs/heads/main",
+  "description": "GitHub Actions running on the main branch",
+  "audiences": ["api://AzureADTokenExchange"]
+}

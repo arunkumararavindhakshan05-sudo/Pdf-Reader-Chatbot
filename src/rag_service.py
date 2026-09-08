@@ -1,8 +1,13 @@
+import os
 from typing import Protocol, TypedDict
 
 from src.retriever import SearchResult
 
-DEFAULT_GROQ_MODEL = "llama-3.1-8b-instant"
+# Groq decommissioned "llama-3.1-8b-instant" on 2026-08-16 and documents
+# "openai/gpt-oss-20b" as its replacement. Reading the name from the
+# environment means the next deprecation is a configuration change on the
+# running container, not a code change and a redeploy.
+DEFAULT_GROQ_MODEL = os.getenv("GROQ_MODEL", "openai/gpt-oss-20b")
 DEFAULT_FALLBACK_ANSWER = "I could not find that information in the PDF."
 
 
