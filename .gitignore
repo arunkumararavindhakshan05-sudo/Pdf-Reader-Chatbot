@@ -29,5 +29,6 @@ data/private/
 
 # Operating-system files
 .DS_Store
-Thumbs.dbClaude outputs/
+Thumbs.db
+Claude outputs/
 *.pdf
