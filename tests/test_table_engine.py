@@ -260,3 +260,29 @@ def test_service_requires_tables_and_question(tables) -> None:
 
     with pytest.raises(ValueError, match="cannot be empty"):
         TableQAService(tables, ScriptedModel([])).answer("  ")
+
+
+def test_service_masked_entities_limits_what_is_hidden(tables) -> None:
+    model = ScriptedModel(
+        [
+            json.dumps(
+                {
+                    "sheet": "Sales",
+                    "aggregations": [{"column": "Amount", "func": "sum"}],
+                }
+            ),
+            "Total is 2,400.",
+        ]
+    )
+    service = TableQAService(
+        tables,
+        model,
+        redact_personal_data=True,
+        masked_entities=frozenset({"EMAIL"}),
+    )
+
+    answer = service.answer("total amount")
+
+    assert answer is not None
+    assert "Arun Kumar" in model.prompts[0]
+    assert answer.masked_counts == {}

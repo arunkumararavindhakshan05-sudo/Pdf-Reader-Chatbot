@@ -8,11 +8,27 @@ import streamlit as st
 from dotenv import load_dotenv
 from pypdf.errors import PdfReadError
 
+from src.azure_speech import (
+    AUDIO_MIME_TYPE as AZURE_AUDIO_MIME_TYPE,
+)
+from src.azure_speech import (
+    AzureSpeechError,
+    create_azure_speech_service,
+)
+from src.azure_speech import (
+    is_configured as azure_speech_configured,
+)
 from src.injection_guard import InjectionFinding, sanitize_chunks, scan_chunks
+from src.language import detect_language
 from src.loaders import SUPPORTED_EXTENSIONS, describe_location, load_document
 from src.ner import load_presidio_detector
 from src.rag_service import RAGService, create_groq_model
 from src.retriever import SearchResult, SemanticRetriever
+from src.summarizer import (
+    SummaryError,
+    summarize_document,
+    summary_chunk,
+)
 from src.table_engine import (
     TablePlanError,
     TableQAService,
@@ -42,6 +58,7 @@ class ChatMessage(TypedDict, total=False):
     content: str
     evidence: list[SearchResult]
     audio: bytes
+    audio_format: str
     masked_counts: dict[str, int]
     table_result: object
 
@@ -54,11 +71,11 @@ st.set_page_config(
 
 
 @st.cache_resource(show_spinner=False)
-def build_document_index(
+def read_document(
     file_name: str,
     file_bytes: bytes,
-) -> tuple[SemanticRetriever, int, int, list[InjectionFinding]]:
-    """Extract a document once, scan it, and cache its semantic search index."""
+) -> tuple[list[dict], int, list[InjectionFinding]]:
+    """Extract a document's chunks once and scan them for injected instructions."""
     chunks, section_count = load_document(file_name, file_bytes)
     findings = scan_chunks(chunks)
     chunks = sanitize_chunks(chunks)
@@ -68,8 +85,45 @@ def build_document_index(
             "No readable text was found. A PDF may contain only scanned images."
         )
 
-    retriever = SemanticRetriever(chunks)
-    return retriever, section_count, len(chunks), findings
+    return chunks, section_count, findings
+
+
+@st.cache_data(show_spinner=False)
+def build_summary(file_name: str, file_bytes: bytes, api_key: str) -> str:
+    """Summarise a document once. Failures are not cached, so they are retried.
+
+    Streamlit caches returned values but not exceptions, so keeping this in its
+    own function means a temporary AI outage does not leave the document
+    permanently without a summary.
+    """
+    chunks, _, _ = read_document(file_name, file_bytes)
+
+    return summarize_document(
+        chunks,
+        model=create_groq_model(api_key),
+        redact_personal_data=True,
+        entity_detector=get_name_detector(),
+    )
+
+
+@st.cache_resource(show_spinner=False)
+def build_document_index(
+    file_name: str,
+    file_bytes: bytes,
+    summary: str,
+) -> tuple[SemanticRetriever, int]:
+    """Index a document, with its whole-document summary as one extra chunk.
+
+    Storing the summary in the index is what lets questions about the document
+    as a whole ("whose resume is this?", "summarise it") find an answer, while
+    ordinary questions still retrieve the passage that answers them.
+    """
+    chunks, _, _ = read_document(file_name, file_bytes)
+
+    if summary:
+        chunks = [summary_chunk(summary), *chunks]
+
+    return SemanticRetriever(chunks), len(chunks)
 
 
 @st.cache_resource(show_spinner=False)
@@ -118,6 +172,14 @@ def render_evidence(evidence: list[SearchResult]) -> None:
                 st.divider()
 
 
+def answer_language_for(answer: str, spoken_language: str | None) -> str:
+    """Pick the language to speak an answer in, without asking the user."""
+    if spoken_language:
+        return spoken_language
+
+    return detect_language(answer)
+
+
 def render_masking_note(masked_counts: dict[str, int]) -> None:
     """Tell the user which personal data was hidden from the AI model."""
     if not masked_counts:
@@ -159,7 +221,10 @@ def render_chat_history(messages: list[ChatMessage]) -> None:
             if message["role"] == "assistant":
                 answer_audio = message.get("audio")
                 if answer_audio:
-                    st.audio(answer_audio, format="audio/wav")
+                    st.audio(
+                        answer_audio,
+                        format=message.get("audio_format", "audio/wav"),
+                    )
 
                 table_result = message.get("table_result")
                 if table_result is not None:
@@ -178,30 +243,7 @@ st.caption(
 api_key = get_groq_api_key()
 
 with st.sidebar:
-    st.header("Retrieval settings")
-
-    top_k = st.slider(
-        "Number of candidate sections",
-        min_value=1,
-        max_value=10,
-        value=5,
-    )
-
-    minimum_score = st.slider(
-        "Minimum similarity score",
-        min_value=0.0,
-        max_value=1.0,
-        value=0.25,
-        step=0.05,
-    )
-
-    st.caption(
-        "Higher similarity thresholds reduce unrelated evidence but may "
-        "reject questions that use different wording."
-    )
-
-    st.divider()
-    st.header("Privacy")
+    st.header("Settings")
 
     redact_personal_data = st.toggle(
         "Mask personal data before sending to AI",
@@ -214,40 +256,78 @@ with st.sidebar:
         ),
     )
 
-    name_detector = get_name_detector() if redact_personal_data else None
-
-    if redact_personal_data and name_detector is None:
-        st.caption(
-            "Name detection (Microsoft Presidio) is not installed, so only "
-            "pattern-based data, spreadsheet name columns and addresses with a "
-            "PIN code are masked."
-        )
-
-    st.divider()
-    st.header("Spoken answers")
-
     read_answers_aloud = st.toggle(
-        "Read new answers aloud",
+        "Read answers aloud",
         value=False,
         disabled=not api_key,
         help=(
-            "When enabled, each new answer is converted to WAV audio "
-            "using Groq text-to-speech."
+            "Answers are spoken in the language you asked in. The language is "
+            "detected automatically and a matching voice is chosen for you."
         ),
     )
 
-    selected_voice_name = st.selectbox(
-        "Answer voice",
-        options=list(TTS_VOICES),
-        index=0,
-        disabled=not read_answers_aloud,
-    )
-    selected_voice = TTS_VOICES[selected_voice_name]
+    if read_answers_aloud and not azure_speech_configured():
+        st.caption(
+            "Only English voices are available. Add AZURE_SPEECH_KEY and "
+            "AZURE_SPEECH_REGION to hear answers in other languages."
+        )
 
-    st.caption(
-        "Speech is generated only for new answers while this option is "
-        "enabled. This avoids unnecessary API usage."
-    )
+    name_detector = get_name_detector() if redact_personal_data else None
+
+    # Everything below is for tuning, not for everyday use, so it stays folded
+    # away: the defaults are what most questions should run with.
+    with st.expander("Advanced"):
+        MASKABLE_TYPES = {
+            "Names": "PERSON",
+            "Places": "LOCATION",
+            "Addresses": "ADDRESS",
+            "Emails": "EMAIL",
+            "Phone numbers": "PHONE",
+            "Aadhaar": "AADHAAR",
+            "PAN": "PAN",
+            "Bank IFSC": "IFSC",
+            "Card numbers": "CARD_NUMBER",
+            "PIN codes": "PIN_CODE",
+            "IP addresses": "IP_ADDRESS",
+        }
+
+        selected_types = st.multiselect(
+            "Data types to mask",
+            options=list(MASKABLE_TYPES),
+            default=list(MASKABLE_TYPES),
+            disabled=not redact_personal_data,
+            help=(
+                "Remove a type to let the AI see it, for example Names when you "
+                "ask whose resume this is."
+            ),
+        )
+        masked_entities = frozenset(MASKABLE_TYPES[label] for label in selected_types)
+
+        if redact_personal_data and name_detector is None:
+            st.caption(
+                "Name detection (Microsoft Presidio) is not installed, so only "
+                "pattern-based data, spreadsheet name columns and addresses "
+                "with a PIN code are masked."
+            )
+
+        top_k = st.slider(
+            "Number of candidate sections",
+            min_value=1,
+            max_value=10,
+            value=5,
+        )
+
+        minimum_score = st.slider(
+            "Minimum similarity score",
+            min_value=0.0,
+            max_value=1.0,
+            value=0.25,
+            step=0.05,
+            help=(
+                "Higher values reduce unrelated evidence but may reject "
+                "questions worded differently from the document."
+            ),
+        )
 
 uploaded_file = st.file_uploader(
     "Upload one document",
@@ -268,10 +348,26 @@ if uploaded_file is None:
 file_bytes = uploaded_file.getvalue()
 document_hash = hashlib.sha256(file_bytes).hexdigest()
 
+summary = ""
+
 try:
-    with st.spinner("Reading the document and building its semantic index..."):
-        retriever, section_count, chunk_count, injection_findings = (
-            build_document_index(uploaded_file.name, file_bytes)
+    with st.spinner("Reading the document..."):
+        _, section_count, injection_findings = read_document(
+            uploaded_file.name, file_bytes
+        )
+
+    if api_key:
+        try:
+            with st.spinner("Summarising the document..."):
+                summary = build_summary(uploaded_file.name, file_bytes, api_key)
+        except (SummaryError, ValueError):
+            LOGGER.exception("The document summary could not be generated.")
+        except Exception:
+            LOGGER.exception("Unexpected failure while summarising the document.")
+
+    with st.spinner("Building the semantic index..."):
+        retriever, chunk_count = build_document_index(
+            uploaded_file.name, file_bytes, summary
         )
         tables = build_tables(uploaded_file.name, file_bytes)
 except (PdfReadError, ValueError) as error:
@@ -303,6 +399,14 @@ st.success(
 )
 render_injection_warning(injection_findings)
 
+if summary:
+    with st.expander("Document summary"):
+        st.markdown(summary.split("\n\n", 1)[-1])
+        st.caption(
+            "Generated once when the document was uploaded, and stored in the "
+            "search index so questions about the whole document can find it."
+        )
+
 render_chat_history(st.session_state.messages)
 
 st.subheader("Ask the document")
@@ -319,6 +423,7 @@ audio_recording = st.audio_input(
 )
 
 voice_question = None
+spoken_answer_language: str | None = None
 
 if audio_recording is not None:
     audio_bytes = audio_recording.getvalue()
@@ -329,19 +434,47 @@ if audio_recording is not None:
             with st.spinner("Transcribing your voice question..."):
                 audio_client = create_groq_audio_client(api_key)
                 voice_service = VoiceService(client=audio_client)
-                voice_question = voice_service.transcribe(
+                # The summary gives Whisper the document's own vocabulary, so
+                # names and technical terms are spelled the way they appear.
+                st.session_state.pending_voice_question = voice_service.transcribe(
                     audio_bytes=audio_bytes,
                     filename=audio_recording.name or "question.wav",
+                    context=summary,
+                )
+                # Whisper reports the language it heard; it beats guessing from
+                # the transcript, and it needs no setting in the interface.
+                st.session_state.detected_language = (
+                    voice_service.last_detected_language
                 )
 
             st.session_state.last_audio_hash = audio_hash
-            st.success(f"Transcribed question: {voice_question}")
         except ValueError as error:
             LOGGER.exception("Voice recording validation failed.")
             st.error(str(error))
         except Exception:
             LOGGER.exception("Voice transcription failed.")
             st.error("The voice question could not be transcribed.")
+
+pending_voice_question = st.session_state.get("pending_voice_question")
+
+if pending_voice_question:
+    st.caption("Check the transcription, correct it if needed, then send it.")
+    edited_question = st.text_input(
+        "Transcribed question",
+        value=pending_voice_question,
+        key=f"voice-text-{document_hash}-{st.session_state.get('last_audio_hash', '')}",
+    )
+
+    send_column, discard_column = st.columns([1, 1])
+
+    if send_column.button("Send this question", type="primary"):
+        voice_question = edited_question.strip()
+        spoken_answer_language = st.session_state.get("detected_language")
+        st.session_state.pending_voice_question = None
+
+    if discard_column.button("Discard recording"):
+        st.session_state.pending_voice_question = None
+        st.rerun()
 
 typed_question = st.chat_input(
     "Ask a question about the uploaded document",
@@ -376,6 +509,7 @@ if question:
                             model=model,
                             redact_personal_data=redact_personal_data,
                             entity_detector=name_detector,
+                            masked_entities=masked_entities,
                         ).answer(question)
                 except (TablePlanError, KeyError, TypeError, ValueError):
                     LOGGER.warning(
@@ -400,6 +534,7 @@ if question:
                         redact_personal_data=redact_personal_data,
                         entity_detector=name_detector,
                         sensitive_values=sensitive_values,
+                        masked_entities=masked_entities,
                     )
                     result = service.answer(question)
 
@@ -413,18 +548,38 @@ if question:
                 )
 
             answer_audio: bytes | None = None
+            answer_audio_format = "audio/wav"
 
             if read_answers_aloud:
                 try:
                     with st.spinner("Generating the spoken answer..."):
-                        audio_client = create_groq_audio_client(api_key)
-                        voice_service = VoiceService(
-                            client=audio_client,
-                            tts_voice=selected_voice,
+                        # A spoken question carries the language Whisper heard;
+                        # a typed one is identified from its script. Azure is
+                        # used when configured, because its voices cover every
+                        # language the app can answer in.
+                        answer_language = answer_language_for(
+                            result["answer"],
+                            spoken_answer_language,
                         )
-                        answer_audio = voice_service.synthesize(result["answer"])
 
-                    st.audio(answer_audio, format="audio/wav")
+                        if azure_speech_configured():
+                            answer_audio = create_azure_speech_service().synthesize(
+                                result["answer"],
+                                language=answer_language,
+                            )
+                            answer_audio_format = AZURE_AUDIO_MIME_TYPE
+                        else:
+                            audio_client = create_groq_audio_client(api_key)
+                            voice_service = VoiceService(client=audio_client)
+                            answer_audio = voice_service.synthesize(result["answer"])
+
+                    st.audio(answer_audio, format=answer_audio_format)
+                except AzureSpeechError:
+                    LOGGER.exception("Azure speech generation failed.")
+                    st.warning(
+                        "The text answer is ready, but Azure Speech could not "
+                        "generate audio. Check the key, region and quota."
+                    )
                 except Exception:
                     LOGGER.exception("Answer speech generation failed.")
                     st.warning(
@@ -444,6 +599,7 @@ if question:
 
             if answer_audio:
                 assistant_message["audio"] = answer_audio
+                assistant_message["audio_format"] = answer_audio_format
 
             if masked_counts:
                 assistant_message["masked_counts"] = masked_counts

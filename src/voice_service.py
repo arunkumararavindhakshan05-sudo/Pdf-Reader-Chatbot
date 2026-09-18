@@ -4,7 +4,36 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 from typing import Protocol
 
-DEFAULT_TRANSCRIPTION_MODEL = "whisper-large-v3-turbo"
+from src.language import normalize_language
+
+# whisper-large-v3 is more accurate than the turbo variant, especially for
+# accented English and for names, which matters more here than speed: a
+# question is a few seconds of audio.
+DEFAULT_TRANSCRIPTION_MODEL = "whisper-large-v3"
+DEFAULT_TRANSCRIPTION_LANGUAGE = "en"
+
+# Whisper large-v3 transcribes about 99 languages. These are offered in the
+# app; "Auto-detect" (None) lets Whisper decide, which is less reliable on
+# short clips, so naming the language is better when you know it.
+TRANSCRIPTION_LANGUAGES: dict[str, str | None] = {
+    "Auto-detect": None,
+    "English": "en",
+    "Tamil": "ta",
+    "Hindi": "hi",
+    "Malayalam": "ml",
+    "Telugu": "te",
+    "Kannada": "kn",
+    "Marathi": "mr",
+    "Bengali": "bn",
+    "Gujarati": "gu",
+    "Punjabi": "pa",
+    "Urdu": "ur",
+    "Arabic": "ar",
+    "French": "fr",
+    "German": "de",
+    "Spanish": "es",
+}
+MAX_TRANSCRIPTION_PROMPT_CHARACTERS = 600
 DEFAULT_TTS_MODEL = "canopylabs/orpheus-v1-english"
 DEFAULT_TTS_VOICE = "hannah"
 MAX_AUDIO_SIZE_BYTES = 25 * 1024 * 1024
@@ -26,7 +55,11 @@ SUPPORTED_AUDIO_EXTENSIONS = frozenset(
 
 
 class TranscriptionResponse(Protocol):
-    """Minimum response returned by the transcription API."""
+    """Minimum response returned by the transcription API.
+
+    ``verbose_json`` responses also carry ``language``, the language Whisper
+    detected while listening, which the app uses to choose a voice.
+    """
 
     text: str
 
@@ -50,6 +83,7 @@ class TranscriptionsAPI(Protocol):
         response_format: str,
         language: str | None,
         temperature: float,
+        prompt: str,
     ) -> TranscriptionResponse:
         """Transcribe an uploaded audio recording."""
         ...
@@ -225,14 +259,26 @@ class VoiceService:
         self._tts_model_name = tts_model_name.strip()
         self._tts_voice = tts_voice.strip()
         self._maximum_speech_chunk_characters = maximum_speech_chunk_characters
+        # The language Whisper detected on the last recording, used to pick a
+        # matching voice for the spoken answer.
+        self.last_detected_language = DEFAULT_TRANSCRIPTION_LANGUAGE
 
     def transcribe(
         self,
         audio_bytes: bytes,
         filename: str = "question.wav",
         language: str | None = None,
+        context: str = "",
     ) -> str:
-        """Convert an audio recording into a cleaned text question."""
+        """Convert an audio recording into a cleaned text question.
+
+        ``language`` is an optional ISO code such as "en" or "ta". It is left
+        unset by default so Whisper detects the language itself and the app
+        needs no language setting; the detected language is kept in
+        ``last_detected_language`` and used to choose a voice. ``context`` is vocabulary from the open
+        document — names, products, technical terms — which Whisper uses to
+        spell unusual words it would otherwise mishear.
+        """
         if not audio_bytes:
             raise ValueError("The audio recording cannot be empty.")
 
@@ -251,19 +297,25 @@ class VoiceService:
             )
 
         cleaned_language = language.strip() if language else None
+        hint = " ".join(context.split())[:MAX_TRANSCRIPTION_PROMPT_CHARACTERS]
 
         response = self._client.audio.transcriptions.create(
             file=(filename, audio_bytes),
             model=self._model_name,
-            response_format="json",
+            response_format="verbose_json",
             language=cleaned_language,
             temperature=0.0,
+            prompt=hint,
         )
 
         transcript = response.text
 
         if not isinstance(transcript, str) or not transcript.strip():
             raise ValueError("The transcription service returned empty text.")
+
+        self.last_detected_language = normalize_language(
+            getattr(response, "language", None)
+        )
 
         return transcript.strip()
 

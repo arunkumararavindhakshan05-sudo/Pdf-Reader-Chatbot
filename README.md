@@ -21,7 +21,9 @@ The application extracts text from an uploaded document, divides it into smaller
 * Convert recorded questions to text with Groq Whisper
 * Retrieve relevant document sections using semantic search
 * Generate answers based on the uploaded document
-* Listen to generated answers using text-to-speech
+* Ask questions by voice in 16 languages, including Tamil, Hindi, Malayalam, Telugu and Kannada, and get answers in the same language
+* Correct the transcription before the question is sent
+* Listen to generated answers using text-to-speech: Groq voices for English, or Azure AI Speech for multilingual answers
 * Choose from multiple available voices
 * Run automated tests for document processing, retrieval, RAG, and voice features
 
@@ -60,6 +62,7 @@ For Excel and CSV files, calculation questions such as "total amount for South" 
 ```text
 Pdf-Reader-Chatbot/
 ├── src/
+│   ├── azure_speech.py
 │   ├── document_processor.py
 │   ├── injection_guard.py
 │   ├── loaders.py
@@ -89,7 +92,9 @@ Pdf-Reader-Chatbot/
 * `injection_guard.py` flags instruction-like text and strips invisible characters from documents.
 * `retriever.py` creates embeddings and retrieves relevant document sections.
 * `rag_service.py` sends the retrieved context to the language model and generates answers.
-* `voice_service.py` handles speech-to-text and text-to-speech operations.
+* `voice_service.py` handles speech-to-text and English text-to-speech with Groq.
+* `azure_speech.py` reads answers aloud in other languages with Azure AI Speech, choosing a voice that matches the answer's language.
+* `summarizer.py` summarises a document once at upload and stores the summary in the index, so questions about the whole document can be answered.
 * `tests/` contains automated tests for the main application components.
 
 ## Local Setup
@@ -190,6 +195,7 @@ ruff check .
 * The spreadsheet engine treats the first non-empty row of each sheet as the header.
 * Answer quality depends on the text available in the uploaded document.
 * A valid Groq API key is required for language and voice features.
+* Multilingual spoken answers need `AZURE_SPEECH_KEY` and `AZURE_SPEECH_REGION`; without them, spoken answers are English-only.
 
 ## Planned Improvements
 

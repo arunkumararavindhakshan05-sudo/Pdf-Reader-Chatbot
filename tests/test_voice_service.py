@@ -4,6 +4,8 @@ import pytest
 
 from src.voice_service import (
     DEFAULT_TRANSCRIPTION_MODEL,
+    MAX_TRANSCRIPTION_PROMPT_CHARACTERS,
+    TRANSCRIPTION_LANGUAGES,
     VoiceService,
     create_groq_audio_client,
 )
@@ -14,6 +16,7 @@ class FakeTranscriptionResponse:
     """A predictable response from the fake transcription API."""
 
     text: str
+    language: str | None = None
 
 
 class FakeTranscriptionsAPI:
@@ -30,6 +33,8 @@ class FakeTranscriptionsAPI:
                 float,
             ]
         ] = []
+        self.prompts: list[str] = []
+        self.language: str | None = None
 
     def create(
         self,
@@ -39,6 +44,7 @@ class FakeTranscriptionsAPI:
         response_format: str,
         language: str | None,
         temperature: float,
+        prompt: str = "",
     ) -> FakeTranscriptionResponse:
         self.calls.append(
             (
@@ -49,8 +55,12 @@ class FakeTranscriptionsAPI:
                 temperature,
             )
         )
+        self.prompts.append(prompt)
 
-        return FakeTranscriptionResponse(text=self.response_text)
+        return FakeTranscriptionResponse(
+            text=self.response_text,
+            language=self.language,
+        )
 
 
 class FakeAudioAPI:
@@ -83,7 +93,7 @@ def test_transcribe_returns_cleaned_text() -> None:
         (
             ("question.wav", b"fake-wav-audio"),
             DEFAULT_TRANSCRIPTION_MODEL,
-            "json",
+            "verbose_json",
             "en",
             0.0,
         )
@@ -215,3 +225,78 @@ def test_create_client_rejects_empty_api_key(
     """A Groq client cannot be created without an API key."""
     with pytest.raises(ValueError, match="cannot be empty"):
         create_groq_audio_client(api_key)
+
+
+def test_transcribe_sets_language_and_document_context() -> None:
+    """Whisper is given the document's own vocabulary, and a language if named."""
+    client = FakeGroqClient("What is Arunkumar's notice period?")
+    service = VoiceService(client=client)
+
+    service.transcribe(
+        audio_bytes=b"audio",
+        language="en",
+        context="Resume  of Arunkumar   Aravindhakshan, QA automation engineer.",
+    )
+
+    api = client.audio.transcriptions
+    assert api.calls[0][3] == "en"
+    assert (
+        api.prompts[0] == "Resume of Arunkumar Aravindhakshan, QA automation engineer."
+    )
+
+
+def test_transcription_context_is_truncated() -> None:
+    client = FakeGroqClient("ok")
+    service = VoiceService(client=client)
+
+    service.transcribe(audio_bytes=b"audio", context="word " * 400)
+
+    assert (
+        len(client.audio.transcriptions.prompts[0])
+        == MAX_TRANSCRIPTION_PROMPT_CHARACTERS
+    )
+
+
+def test_transcription_model_favours_accuracy() -> None:
+    assert DEFAULT_TRANSCRIPTION_MODEL == "whisper-large-v3"
+
+
+def test_language_can_be_set_or_auto_detected() -> None:
+    """A named language is passed through; None lets Whisper detect it."""
+    client = FakeGroqClient("என்ன")
+    service = VoiceService(client=client)
+
+    service.transcribe(audio_bytes=b"audio", language="ta")
+    service.transcribe(audio_bytes=b"audio", language=None)
+
+    assert [call[3] for call in client.audio.transcriptions.calls] == ["ta", None]
+
+
+def test_offered_languages_include_indian_languages() -> None:
+    assert TRANSCRIPTION_LANGUAGES["Auto-detect"] is None
+    assert TRANSCRIPTION_LANGUAGES["Tamil"] == "ta"
+    assert {"English", "Hindi", "Malayalam", "Telugu", "Kannada"} <= set(
+        TRANSCRIPTION_LANGUAGES
+    )
+
+
+def test_detected_language_is_recorded_from_the_response() -> None:
+    """Whisper reports the language it heard, so the app needs no setting."""
+    client = FakeGroqClient("இது யாருடைய resume?")
+    client.audio.transcriptions.language = "tamil"
+    service = VoiceService(client=client)
+
+    service.transcribe(audio_bytes=b"audio")
+
+    assert service.last_detected_language == "ta"
+    assert client.audio.transcriptions.calls[0][2] == "verbose_json"
+
+
+def test_language_defaults_to_auto_detection() -> None:
+    client = FakeGroqClient("hello")
+    service = VoiceService(client=client)
+
+    service.transcribe(audio_bytes=b"audio")
+
+    assert client.audio.transcriptions.calls[0][3] is None
+    assert service.last_detected_language == "en"

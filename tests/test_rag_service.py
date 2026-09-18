@@ -266,3 +266,52 @@ def test_answer_masks_registered_spreadsheet_names() -> None:
 
     assert "Arun Kumar" not in model.prompts[0]
     assert result["answer"] == "Arun Kumar sold 1200 [Page 3]."
+
+
+def test_masked_entities_can_leave_names_visible() -> None:
+    evidence = [make_evidence(text="Resume of Arun Kumar, email a@b.io")]
+    model = FakeChatModel("Arun Kumar [Page 3].")
+    service = RAGService(
+        retriever=FakeRetriever(evidence),
+        model=model,
+        redact_personal_data=True,
+        sensitive_values={"PERSON": ["Arun Kumar"]},
+        masked_entities=frozenset({"EMAIL"}),
+    )
+
+    result = service.answer("Whose resume is this?")
+
+    assert "Arun Kumar" in model.prompts[0]
+    assert "a@b.io" not in model.prompts[0]
+    assert result["masked_counts"] == {"EMAIL": 1}
+
+
+def test_prompt_tells_model_placeholders_are_real_values() -> None:
+    prompt = build_grounded_prompt("Who?", [make_evidence(text="<PERSON_1> applied.")])
+
+    assert "reply with the placeholder itself" in prompt
+
+
+def test_document_summary_survives_the_similarity_threshold() -> None:
+    """A whole-document question rarely matches the summary's wording closely."""
+    summary = make_evidence(text="Resume of Arun Kumar", page=0, chunk=1, score=0.12)
+    summary["location"] = "Document summary"
+    weak_match = make_evidence(text="Skills: Python", page=2, chunk=1, score=0.10)
+    model = FakeChatModel("Arun Kumar [Document summary].")
+    service = RAGService(
+        retriever=FakeRetriever([summary, weak_match]),
+        model=model,
+        minimum_score=0.25,
+    )
+
+    result = service.answer("Whose resume is this?")
+
+    assert result["answer"] == "Arun Kumar [Document summary]."
+    assert [item["page"] for item in result["evidence"]] == [0]
+    assert "Skills: Python" not in model.prompts[0]
+
+
+def test_prompt_asks_for_an_answer_in_the_question_language() -> None:
+    prompt = build_grounded_prompt("இது யாருடைய resume?", [make_evidence()])
+
+    assert "same language as the question" in prompt
