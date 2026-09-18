@@ -1,4 +1,4 @@
-from typing import Protocol, TypedDict
+from typing import NotRequired, Protocol, TypedDict
 
 import faiss
 import numpy as np
@@ -9,12 +9,13 @@ DEFAULT_EMBEDDING_MODEL = "all-MiniLM-L6-v2"
 
 
 class SearchResult(TypedDict):
-    """A retrieved PDF section and its semantic similarity score."""
+    """A retrieved document section and its semantic similarity score."""
 
     text: str
     page: int
     chunk: int
     score: float
+    location: NotRequired[str]
 
 
 class EmbeddingModel(Protocol):
@@ -127,13 +128,16 @@ class SemanticRetriever:
 
             chunk = self._chunks[int(index)]
 
-            results.append(
-                {
-                    "text": chunk["text"],
-                    "page": chunk["page"],
-                    "chunk": chunk["chunk"],
-                    "score": float(score),
-                }
-            )
+            result: SearchResult = {
+                "text": chunk["text"],
+                "page": chunk["page"],
+                "chunk": chunk["chunk"],
+                "score": float(score),
+            }
+
+            if "location" in chunk:
+                result["location"] = chunk["location"]
+
+            results.append(result)
 
         return results

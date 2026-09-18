@@ -41,6 +41,13 @@ from sentence_transformers import SentenceTransformer; \
 SentenceTransformer('all-MiniLM-L6-v2'); \
 print('embedding model cached')"
 
+# Fail the build early if Presidio or its spaCy model cannot load. Otherwise the
+# app would silently fall back to pattern-only masking in production.
+RUN python -c "\
+import spacy; spacy.load('en_core_web_sm'); \
+from presidio_analyzer import AnalyzerEngine; \
+print('presidio and spaCy model ready')"
+
 # Drop pip/setuptools caches and compiled test fixtures that add size but no value
 RUN find /opt/venv -type d -name '__pycache__' -prune -exec rm -rf {} + && \
     find /opt/venv -type d -name 'tests' -prune -exec rm -rf {} + && \

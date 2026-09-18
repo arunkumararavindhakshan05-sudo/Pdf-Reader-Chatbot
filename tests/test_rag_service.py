@@ -211,3 +211,58 @@ def test_create_groq_model_rejects_empty_key(api_key: str) -> None:
     """The application should fail clearly when its API key is missing."""
     with pytest.raises(ValueError, match="cannot be empty"):
         create_groq_model(api_key)
+
+
+def test_answer_masks_personal_data_and_restores_answer() -> None:
+    """With redaction on, the model never sees raw PII but the user does."""
+    evidence = [
+        make_evidence(text="Invoice approved by arun@example.com on 2 May.")
+        | {"location": "Sheet 'Invoices', rows 2-41"}
+    ]
+    model = FakeChatModel("Approved by <EMAIL_1> [Sheet 'Invoices', rows 2-41].")
+    service = RAGService(
+        retriever=FakeRetriever(evidence),
+        model=model,
+        redact_personal_data=True,
+    )
+
+    result = service.answer("Who approved it? Reply to arun@example.com")
+
+    prompt = model.prompts[0]
+    assert "arun@example.com" not in prompt
+    assert "Reply to <EMAIL_1>" in prompt
+    assert "Invoice approved by <EMAIL_1> on 2 May." in prompt
+    assert "[Sheet 'Invoices', rows 2-41, chunk 1" in prompt
+    assert (
+        result["answer"]
+        == "Approved by arun@example.com [Sheet 'Invoices', rows 2-41]."
+    )
+    assert result["masked_counts"] == {"EMAIL": 1}
+    assert result["evidence"][0]["text"] == evidence[0]["text"]
+
+
+def test_answer_without_redaction_sends_original_text() -> None:
+    evidence = [make_evidence(text="Call 9876543210 for support.")]
+    model = FakeChatModel("Call 9876543210 [Page 3].")
+    service = RAGService(retriever=FakeRetriever(evidence), model=model)
+
+    result = service.answer("Support number?")
+
+    assert "9876543210" in model.prompts[0]
+    assert "masked_counts" not in result
+
+
+def test_answer_masks_registered_spreadsheet_names() -> None:
+    evidence = [make_evidence(text="Sales Rep | Amount\nArun Kumar | 1200")]
+    model = FakeChatModel("<PERSON_1> sold 1200 [Page 3].")
+    service = RAGService(
+        retriever=FakeRetriever(evidence),
+        model=model,
+        redact_personal_data=True,
+        sensitive_values={"PERSON": ["Arun Kumar"]},
+    )
+
+    result = service.answer("How much did Arun Kumar sell?")
+
+    assert "Arun Kumar" not in model.prompts[0]
+    assert result["answer"] == "Arun Kumar sold 1200 [Page 3]."

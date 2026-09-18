@@ -1,16 +1,23 @@
 from io import BytesIO
-from typing import TypedDict
+from typing import NotRequired, TypedDict
 
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from pypdf import PdfReader
 
 
 class DocumentChunk(TypedDict):
-    """A searchable section of a PDF with its source location."""
+    """A searchable section of a document with its source location.
+
+    ``page`` is the 1-based position of the section inside the document
+    (a PDF page, a slide, a worksheet or a paragraph block). ``location`` is
+    an optional human-readable label such as ``"Sheet 'Sales', rows 2-41"``.
+    When it is missing, the section is described as ``"Page <page>"``.
+    """
 
     text: str
     page: int
     chunk: int
+    location: NotRequired[str]
 
 
 def extract_chunks(
